@@ -8,6 +8,42 @@ import numpy as np
 import plotly.graph_objects as go
 from scipy.ndimage import gaussian_filter
 from skimage import measure
+from allen_api import get_structure_info
+import os
+import hashlib
+
+
+_MESH_CACHE_DIR = ".cache/meshes"
+
+
+def _mesh_cache_key(sid, smooth_sigma, mask_sum, shape):
+    """Create a short key for caching based on structure id and parameters."""
+    key_raw = f"{sid}_{smooth_sigma}_{int(mask_sum)}_{shape[0]}x{shape[1]}x{shape[2]}"
+    return hashlib.sha1(key_raw.encode("utf-8")).hexdigest()
+
+
+def _mesh_cache_path(key):
+    os.makedirs(_MESH_CACHE_DIR, exist_ok=True)
+    return os.path.join(_MESH_CACHE_DIR, f"{key}.npz")
+
+
+def _mesh_cache_load(key):
+    path = _mesh_cache_path(key)
+    if not os.path.exists(path):
+        return None
+    try:
+        data = np.load(path)
+        return data["verts"], data["faces"]
+    except Exception:
+        return None
+
+
+def _mesh_cache_save(key, verts, faces):
+    path = _mesh_cache_path(key)
+    try:
+        np.savez_compressed(path, verts=verts, faces=faces)
+    except Exception:
+        pass
 
 
 def create_smooth_volume(atlas, sigma=2.0):
@@ -19,51 +55,115 @@ def create_smooth_volume(atlas, sigma=2.0):
     return smoothed
 
 
-def plot_3d_brain(atlas, title="3D Brain Atlas", show_axes=True):
-    """
-    Create an interactive 3D brain visualization with smooth surface mesh.
-    Uses marching cubes algorithm for true surface rendering.
-    """
-    smoothed_atlas = create_smooth_volume(atlas, sigma=2.0)
-    threshold = smoothed_atlas.max() * 0.4
-    
+def hex_to_rgb(hex_color):
+    """Convert hex color to RGB tuple (0-1 scale)."""
+    if not hex_color or len(hex_color) != 6:
+        return (0.5, 0.5, 0.5)  # Default gray
     try:
-        # Use marching cubes to generate surface mesh
-        verts, faces, _, _ = measure.marching_cubes(smoothed_atlas, level=threshold)
-        
-        # Create figure with mesh
-        fig = go.Figure(data=[go.Mesh3d(
+        r = int(hex_color[0:2], 16) / 255.0
+        g = int(hex_color[2:4], 16) / 255.0
+        b = int(hex_color[4:6], 16) / 255.0
+        return (r, g, b)
+    except:
+        return (0.5, 0.5, 0.5)
+
+
+def get_structure_color(struct_id, color_cache):
+    """Get RGB color for a structure from cache or API."""
+    if struct_id in color_cache:
+        return color_cache[struct_id]
+    
+    info = get_structure_info(int(struct_id))
+    if info and info.get('color_hex_triplet'):
+        rgb = hex_to_rgb(info['color_hex_triplet'])
+    else:
+        rgb = (0.5, 0.5, 0.5)  # Default gray
+    
+    color_cache[struct_id] = rgb
+    return rgb
+
+
+def plot_3d_brain(atlas, title="3D Brain Atlas", show_axes=True, smooth_sigma=1.0, min_voxels=20, opacity=0.9, camera_eye=(1.5,1.5,1.3)):
+    """
+    Create an interactive 3D brain visualization with color-coded structures.
+    Uses marching cubes algorithm for true surface rendering.
+    Shows structure info on hover with Allen API colors.
+    """
+    # Render each structure as its own smoothed mesh. This produces distinct,
+    # colored surfaces (instead of a single blended blob) similar to the
+    # Allen 3D viewer.
+    structure_ids = np.unique(atlas[atlas > 0])
+    fig = go.Figure()
+
+    # lighting defaults for nicer surface appearance
+    lighting = dict(ambient=0.6, diffuse=0.8, roughness=0.5, specular=0.5)
+
+    for sid in structure_ids:
+        sid = int(sid)
+        mask = (atlas == sid).astype(float)
+        # skip tiny regions
+        if mask.sum() < min_voxels:
+            continue
+
+        # smooth binary mask to create clean surface
+        smooth_mask = gaussian_filter(mask, sigma=smooth_sigma)
+
+        # Try loading cached mesh first
+        cache_key = _mesh_cache_key(sid, smooth_sigma, mask.sum(), atlas.shape)
+        cached = _mesh_cache_load(cache_key)
+        if cached is not None:
+            verts, faces = cached
+        else:
+            try:
+                verts, faces, _, _ = measure.marching_cubes(smooth_mask, level=0.5)
+            except Exception:
+                continue
+            # save to cache (best-effort)
+            _mesh_cache_save(cache_key, verts, faces)
+
+        # Get color and name from Allen API
+        info = get_structure_info(sid)
+        if info and info.get('color_hex_triplet'):
+            color_hex = f"#{info.get('color_hex_triplet')}"
+        else:
+            color_hex = "#808080"
+        name = info.get('name', f'Structure {sid}') if info else f'Structure {sid}'
+
+        # Prepare hover text per-vertex (same name for all)
+        hover_text = [name] * len(verts)
+
+        # Create mesh for this structure (note: verts are z,y,x)
+        mesh = go.Mesh3d(
             x=verts[:, 2],
             y=verts[:, 1],
             z=verts[:, 0],
             i=faces[:, 0],
             j=faces[:, 1],
             k=faces[:, 2],
-            opacity=0.8,
-            color='steelblue',
-            showlegend=True,
-            name='Brain Surface'
-        )])
-        
-    except Exception as e:
-        # Fallback to scatter if marching cubes fails
+            color=color_hex,
+            opacity=opacity,
+            name=name,
+            hovertext=hover_text,
+            hoverinfo='text',
+            lighting=lighting,
+            flatshading=False
+        )
+
+        fig.add_trace(mesh)
+
+    # If no structure meshes were added, fallback to smoothed volume scatter
+    if not fig.data:
+        smoothed_atlas = create_smooth_volume(atlas, sigma=2.0)
+        threshold = smoothed_atlas.max() * 0.4
         coords = np.argwhere(smoothed_atlas > threshold)
         if len(coords) == 0:
             return None
         x, y, z = coords[:, 2], coords[:, 1], coords[:, 0]
-        intensities = smoothed_atlas[smoothed_atlas > threshold]
-        
-        fig = go.Figure(data=[go.Scatter3d(
+        fig.add_trace(go.Scatter3d(
             x=x, y=y, z=z,
             mode='markers',
-            marker=dict(
-                size=2,
-                color=intensities,
-                colorscale='Viridis',
-                showscale=True,
-                opacity=0.8
-            )
-        )])
+            marker=dict(size=2, color='lightgray', opacity=0.8)
+        ))
     
     fig.update_layout(
         title=title,
@@ -75,7 +175,7 @@ def plot_3d_brain(atlas, title="3D Brain Atlas", show_axes=True):
             xaxis=dict(showgrid=show_axes),
             yaxis=dict(showgrid=show_axes),
             zaxis=dict(showgrid=show_axes),
-            camera=dict(eye=dict(x=1.5, y=1.5, z=1.3))
+            camera=dict(eye=dict(x=camera_eye[0], y=camera_eye[1], z=camera_eye[2]))
         ),
         height=700,
         hovermode='closest',
@@ -85,43 +185,53 @@ def plot_3d_brain(atlas, title="3D Brain Atlas", show_axes=True):
     return fig
 
 
-def plot_cutting_plane(atlas, cut_axis='z', cut_position=0.5, blade_angle=0):
+def plot_cutting_plane(atlas, cut_axis='z', cut_position=0.5, blade_angle=0, smooth_sigma=1.0, min_voxels=20, opacity=0.8, camera_eye=(1.5,1.5,1.3)):
     """
     Visualize the smoothed brain with a rotatable cutting plane overlay.
+    Uses color-coded structures from Allen Atlas.
     cut_axis: 'x', 'y', or 'z'
     cut_position: 0-1 normalized position along axis
     blade_angle: rotation angle of cutting plane in degrees
     """
-    smoothed_atlas = create_smooth_volume(atlas, sigma=2.0)
-    threshold = smoothed_atlas.max() * 0.4
-    
-    try:
-        verts, faces, _, _ = measure.marching_cubes(smoothed_atlas, level=threshold)
-        
-        fig = go.Figure(data=[go.Mesh3d(
-            x=verts[:, 2],
-            y=verts[:, 1],
-            z=verts[:, 0],
-            i=faces[:, 0],
-            j=faces[:, 1],
-            k=faces[:, 2],
-            opacity=0.7,
-            color='steelblue',
-            name='Brain Surface'
-        )])
-        
-    except Exception as e:
-        coords = np.argwhere(smoothed_atlas > threshold)
-        if len(coords) == 0:
-            return None
-        x, y, z = coords[:, 2], coords[:, 1], coords[:, 0]
-        intensities = smoothed_atlas[smoothed_atlas > threshold]
-        
-        fig = go.Figure(data=[go.Scatter3d(
-            x=x, y=y, z=z,
-            mode='markers',
-            marker=dict(size=2, color=intensities, opacity=0.7)
-        )])
+    # Render per-structure meshes like `plot_3d_brain`, but keep room for the
+    # cutting plane overlay.
+    fig = go.Figure()
+    lighting = dict(ambient=0.6, diffuse=0.8, roughness=0.5, specular=0.5)
+
+    structure_ids = np.unique(atlas[atlas > 0])
+    for sid in structure_ids:
+        sid = int(sid)
+        mask = (atlas == sid).astype(float)
+        if mask.sum() < min_voxels:
+            continue
+        smooth_mask = gaussian_filter(mask, sigma=smooth_sigma)
+        # Try mesh cache
+        cache_key = _mesh_cache_key(sid, smooth_sigma, mask.sum(), atlas.shape)
+        cached = _mesh_cache_load(cache_key)
+        if cached is not None:
+            verts, faces = cached
+        else:
+            try:
+                verts, faces, _, _ = measure.marching_cubes(smooth_mask, level=0.5)
+            except Exception:
+                continue
+            _mesh_cache_save(cache_key, verts, faces)
+
+        info = get_structure_info(sid)
+        if info and info.get('color_hex_triplet'):
+            color_hex = f"#{info.get('color_hex_triplet')}"
+        else:
+            color_hex = "#808080"
+        name = info.get('name', f'Structure {sid}') if info else f'Structure {sid}'
+
+        mesh = go.Mesh3d(
+            x=verts[:, 2], y=verts[:, 1], z=verts[:, 0],
+            i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
+            color=color_hex, opacity=opacity, name=name,
+            hovertext=[name] * len(verts), hoverinfo='text',
+            lighting=lighting, flatshading=False
+        )
+        fig.add_trace(mesh)
     
     # Get axis dimensions
     dims = atlas.shape
