@@ -83,7 +83,7 @@ def get_structure_color(struct_id, color_cache):
     return rgb
 
 
-def plot_3d_brain(atlas, title="3D Brain Atlas", show_axes=True, smooth_sigma=1.0, min_voxels=20, opacity=0.9, camera_eye=(1.5,1.5,1.3)):
+def plot_3d_brain(atlas, title="3D Brain Atlas", show_axes=True, smooth_sigma=1.0, min_voxels=20, opacity=0.9, camera_eye=(1.5,1.5,1.3), camera=None, voxel_size=(25.0, 25.0, 25.0)):
     """
     Create an interactive 3D brain visualization with color-coded structures.
     Uses marching cubes algorithm for true surface rendering.
@@ -133,10 +133,11 @@ def plot_3d_brain(atlas, title="3D Brain Atlas", show_axes=True, smooth_sigma=1.
         hover_text = [name] * len(verts)
 
         # Create mesh for this structure (note: verts are z,y,x)
+        vz, vy, vx = voxel_size
         mesh = go.Mesh3d(
-            x=verts[:, 2],
-            y=verts[:, 1],
-            z=verts[:, 0],
+            x=verts[:, 2] * vx,
+            y=verts[:, 1] * vy,
+            z=verts[:, 0] * vz,
             i=faces[:, 0],
             j=faces[:, 1],
             k=faces[:, 2],
@@ -158,13 +159,23 @@ def plot_3d_brain(atlas, title="3D Brain Atlas", show_axes=True, smooth_sigma=1.
         coords = np.argwhere(smoothed_atlas > threshold)
         if len(coords) == 0:
             return None
-        x, y, z = coords[:, 2], coords[:, 1], coords[:, 0]
+        vz, vy, vx = voxel_size
+        x, y, z = coords[:, 2] * vx, coords[:, 1] * vy, coords[:, 0] * vz
         fig.add_trace(go.Scatter3d(
             x=x, y=y, z=z,
             mode='markers',
             marker=dict(size=2, color='lightgray', opacity=0.8)
         ))
     
+    # If caller provided a camera dict, use it; otherwise fall back to camera_eye tuple
+    scene_camera = dict(eye=dict(x=camera_eye[0], y=camera_eye[1], z=camera_eye[2]))
+    if camera and isinstance(camera, dict):
+        # Expecting {'x':.., 'y':.., 'z':..} or Plotly camera dict
+        if 'eye' in camera and isinstance(camera['eye'], dict):
+            scene_camera = camera
+        else:
+            scene_camera = dict(eye=dict(x=float(camera.get('x', camera_eye[0])), y=float(camera.get('y', camera_eye[1])), z=float(camera.get('z', camera_eye[2]))))
+
     fig.update_layout(
         title=title,
         scene=dict(
@@ -175,7 +186,7 @@ def plot_3d_brain(atlas, title="3D Brain Atlas", show_axes=True, smooth_sigma=1.
             xaxis=dict(showgrid=show_axes),
             yaxis=dict(showgrid=show_axes),
             zaxis=dict(showgrid=show_axes),
-            camera=dict(eye=dict(x=camera_eye[0], y=camera_eye[1], z=camera_eye[2]))
+            camera=scene_camera.get('camera', scene_camera) if isinstance(scene_camera, dict) else scene_camera
         ),
         height=700,
         hovermode='closest',
@@ -185,7 +196,7 @@ def plot_3d_brain(atlas, title="3D Brain Atlas", show_axes=True, smooth_sigma=1.
     return fig
 
 
-def plot_cutting_plane(atlas, cut_axis='z', cut_position=0.5, blade_angle=0, smooth_sigma=1.0, min_voxels=20, opacity=0.8, camera_eye=(1.5,1.5,1.3)):
+def plot_cutting_plane(atlas, cut_axis='z', cut_position=0.5, blade_angle=0, smooth_sigma=1.0, min_voxels=20, opacity=0.8, camera_eye=(1.5,1.5,1.3), camera=None, highlight_mask=None, highlight_color="#ff3333", highlight_opacity=0.35, voxel_size=(25.0,25.0,25.0)):
     """
     Visualize the smoothed brain with a rotatable cutting plane overlay.
     Uses color-coded structures from Allen Atlas.
@@ -224,8 +235,9 @@ def plot_cutting_plane(atlas, cut_axis='z', cut_position=0.5, blade_angle=0, smo
             color_hex = "#808080"
         name = info.get('name', f'Structure {sid}') if info else f'Structure {sid}'
 
+        vz, vy, vx = voxel_size
         mesh = go.Mesh3d(
-            x=verts[:, 2], y=verts[:, 1], z=verts[:, 0],
+            x=verts[:, 2] * vx, y=verts[:, 1] * vy, z=verts[:, 0] * vz,
             i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
             color=color_hex, opacity=opacity, name=name,
             hovertext=[name] * len(verts), hoverinfo='text',
@@ -248,8 +260,8 @@ def plot_cutting_plane(atlas, cut_axis='z', cut_position=0.5, blade_angle=0, smo
         plane_x = [0, dims[2], dims[2], 0, 0]
         plane_y = [0, 0, dims[1], dims[1], 0]
         plane_z = [plane_pos] * 5
-        
-        # Rotate plane around center
+
+        # Rotate plane around center (voxel coords)
         cx, cy = dims[2] / 2, dims[1] / 2
         rotated_x = [cx + (x - cx) * cos_a - (y - cy) * sin_a for x, y in zip(plane_x, plane_y)]
         rotated_y = [cy + (x - cx) * sin_a + (y - cy) * cos_a for x, y in zip(plane_x, plane_y)]
@@ -275,16 +287,63 @@ def plot_cutting_plane(atlas, cut_axis='z', cut_position=0.5, blade_angle=0, smo
         rotated_z = [cz + (y - cy) * sin_a + (z - cz) * cos_a for y, z in zip(plane_y, plane_z)]
         plane_y, plane_z = rotated_y, rotated_z
     
+    # Scale plane coordinates into micrometers
+    vz, vy, vx = voxel_size
+    # convert voxel coords to micrometers matching axis
+    if cut_axis == 'z':
+        sx = [px * vx for px in plane_x]
+        sy = [py * vy for py in plane_y]
+        sz = [pz * vz for pz in plane_z]
+    elif cut_axis == 'y':
+        sx = [px * vx for px in plane_x]
+        sy = [py * vy for py in plane_y]
+        sz = [pz * vz for pz in plane_z]
+    else:
+        sx = [px * vx for px in plane_x]
+        sy = [py * vy for py in plane_y]
+        sz = [pz * vz for pz in plane_z]
+
     fig.add_trace(go.Scatter3d(
-        x=plane_x, y=plane_y, z=plane_z,
+        x=sx, y=sy, z=sz,
         mode='lines',
         line=dict(color='red', width=5),
         name=f'Blade (angle: {blade_angle}°)'
     ))
+
+    # If a highlight mask was provided (boolean mask of voxels to highlight), render its surface
+    if highlight_mask is not None:
+        try:
+            # Smooth and extract surface for highlighted region
+            hmask = (highlight_mask > 0).astype(float)
+            if hmask.sum() > 0:
+                h_smooth = gaussian_filter(hmask, sigma=max(1.0, smooth_sigma))
+                verts, faces, _, _ = measure.marching_cubes(h_smooth, level=0.5)
+                # Add highlight mesh (note: make it semi-transparent and on top)
+                # scale highlight verts by voxel size
+                vz, vy, vx = voxel_size
+                highlight_mesh = go.Mesh3d(
+                    x=verts[:, 2] * vx, y=verts[:, 1] * vy, z=verts[:, 0] * vz,
+                    i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
+                    color=highlight_color, opacity=highlight_opacity, name='To be cut',
+                    hovertext=['To be cut'] * len(verts), hoverinfo='text',
+                    lighting=dict(ambient=0.6, diffuse=0.4, roughness=0.9, specular=0.2),
+                    flatshading=True
+                )
+                fig.add_trace(highlight_mesh)
+        except Exception:
+            pass
     
+    # Respect provided camera if available
+    scene_camera = dict(eye=dict(x=camera_eye[0], y=camera_eye[1], z=camera_eye[2]))
+    if camera and isinstance(camera, dict):
+        if 'eye' in camera and isinstance(camera['eye'], dict):
+            scene_camera = camera
+        else:
+            scene_camera = dict(eye=dict(x=float(camera.get('x', camera_eye[0])), y=float(camera.get('y', camera_eye[1])), z=float(camera.get('z', camera_eye[2]))))
+
     fig.update_layout(
         title="3D Brain with Cutting Blade",
-        scene=dict(aspectmode="data"),
+        scene=dict(aspectmode="data", camera=scene_camera.get('camera', scene_camera) if isinstance(scene_camera, dict) else scene_camera),
         height=700,
         margin=dict(l=0, r=0, b=0, t=40)
     )

@@ -30,4 +30,9 @@ def load_mock_atlas():
     # Striatum (363) - central region
     atlas[8:16, 15:25, 15:35] = 363
     
-    return atlas
+    # Define voxel size in micrometers (z, y, x). These are example values
+    # realistic for small-animal atlases; adjust as needed.
+    voxel_size_um = (25.0, 25.0, 25.0)
+
+    return atlas, voxel_size_um
+    

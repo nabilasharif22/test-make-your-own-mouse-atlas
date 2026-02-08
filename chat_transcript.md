@@ -1,10 +1,19 @@
-# Chat Transcript — Interactive 3D Brain Slicer (saved)
 
-Date saved: 2026-02-07
+## Used chatGPT to generate the initial files using promts:
+1) " is there a website that generates mouse atlas based on the cross section coordinates that the user inputs"
+2) "how to I use the API"
 
-This file contains a saved transcript of the interactive session between you (the user) and the coding assistant. It includes a short chronological transcript (summarized for clarity), a list of commands run during the session, and a summary of repository files that were changed by the assistant.
+3) "let me give you some context for why I want to do this: in lab, we make brain slices. we cut off certain parts of the brain (say the cerebellum), and maybe some other cuts. then, we lay the brain along one of cuts and make slices from the top. I want an interface that allows me to "cut" off sections and make make atlases of my choosing"
+3) "this project requires that I use an api. this is for a coding with ai class. I want to make a tool that is useful"
+4) " ok, now make the website with all the features in python. separate the files so its easy to understand whats going on where. use the allen brain atlas api. make sure the interface is easy for a novice to use. include inline comments to explain the code."
 
----
+
+
+## Used Copilot from this point
+Asked copilot to make the website look more like 
+https://connectivity.brain-map.org/3d-viewer?v=1. 
+
+Lost this portion of the chat history due to VSCode closing
 
 ## 1) Short chronological transcript (summarized)
 
@@ -35,6 +44,20 @@ This file contains a saved transcript of the interactive session between you (th
 - User: Asked specifically to increase `min_voxels`, reduce `smooth_sigma`, and precompute/cache meshes. Assistant implemented defaults changes, added mesh cache, and offered to precompute caches.
 
 - User: Requested to "do it" (save the chat). The assistant is creating this file now.
+
+### Recent important user queries (summary only)
+
+- User: Asked to display which region was cut off and convert voxel counts to micrometers.
+- User: Requested control over slice thickness in μm and removal of the min‑voxels filter.
+- User: Asked to stop resetting the 3D viewer orientation when blade settings change.
+- User: Asked to make it obvious which part will be cut before confirming the cut.
+- User: Reported that cuts were removing whole regions instead of producing slices.
+- User: Requested slab‑only extraction around the cut plane and mesh scaling by voxel spacing.
+- User: Requested actual color swatches (not just color IDs) in Browse Slices.
+- User: Requested removal of the “Place Brain” button/gate.
+- User: Requested a short video script explaining the app and API usage, then asked for a longer API‑focused version.
+- User: Requested README update to describe API usage at a high level.
+- User: Requested the chat transcript be updated with recent important queries.
 
 ---
 
