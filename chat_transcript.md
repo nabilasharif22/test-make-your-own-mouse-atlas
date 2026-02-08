@@ -47,17 +47,15 @@ Lost this portion of the chat history due to VSCode closing
 
 ### Recent important user queries (summary only)
 
-- User: Asked to display which region was cut off and convert voxel counts to micrometers.
-- User: Requested control over slice thickness in μm and removal of the min‑voxels filter.
-- User: Asked to stop resetting the 3D viewer orientation when blade settings change.
-- User: Asked to make it obvious which part will be cut before confirming the cut.
-- User: Reported that cuts were removing whole regions instead of producing slices.
-- User: Requested slab‑only extraction around the cut plane and mesh scaling by voxel spacing.
-- User: Requested actual color swatches (not just color IDs) in Browse Slices.
-- User: Requested removal of the “Place Brain” button/gate.
-- User: Requested a short video script explaining the app and API usage, then asked for a longer API‑focused version.
-- User: Requested README update to describe API usage at a high level.
-- User: Requested the chat transcript be updated with recent important queries.
+- User: Asked to identify which structures were cut off after a blade cut and to convert voxel counts into physical units (μm and μm³).
+- User: Requested a control to set slice thickness in micrometers and to remove the “Min voxels per structure” filter so small regions remain visible.
+- User: Asked to keep the 3D viewer orientation stable instead of resetting when blade settings change.
+- User: Asked for a clear visual indicator of the region that will be cut before committing the cut.
+- User: Reported that the app was cutting off whole regions instead of producing slices and asked to fix slicing behavior.
+- User: Requested slab‑only extraction centered on the cutting plane and scaling meshes by voxel spacing to correct shape proportions.
+- User: Requested that Browse Slices show actual structure colors (swatches) instead of only color IDs.
+- User: Requested removal of the “Place Brain” step because its purpose wasn’t clear.
+- User: Requested that the chat transcript be updated to reflect recent important queries (without logging assistant actions).
 
 ---
 
